@@ -3,477 +3,331 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🤖 Survival Agent · 实时交易面板</title>
+<title>Survival Agent v2 - Real Strategy</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  :root {
-    --bg: #0a0e1a; --panel: #111827; --border: #1f2937;
-    --green: #10b981; --red: #ef4444; --blue: #3b82f6;
-    --yellow: #f59e0b; --text: #e5e7eb; --muted: #6b7280;
-    --profit: #10b981; --loss: #ef4444;
-  }
-  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; min-height: 100vh; }
-
-  /* TOP BAR */
-  .topbar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 24px; border-bottom: 1px solid var(--border);
-    background: var(--panel);
-  }
-  .topbar h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.05em; }
-  .alive-badge {
-    display: flex; align-items: center; gap: 8px;
-    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
-  }
-  .alive-badge.alive { background: rgba(16,185,129,0.15); color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
-  .alive-badge.dead { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
-  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 1.5s infinite; }
-  .dead .pulse { background: var(--red); animation: none; }
-  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.8)} }
-
-  /* METRICS */
-  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px 24px; }
-  .metric { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-  .metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
-  .metric-value { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
-  .metric-value.green { color: var(--green); }
-  .metric-value.red { color: var(--red); }
-  .metric-value.blue { color: var(--blue); }
-  .metric-value.yellow { color: var(--yellow); }
-  .metric-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
-
-  /* MAIN LAYOUT */
-  .main { display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 0 24px 24px; height: calc(100vh - 180px); }
-
-  /* TRADE FEED */
-  .feed-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
-  .panel-header { padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-  .feed-list { flex: 1; overflow-y: auto; padding: 8px; }
-  .feed-list::-webkit-scrollbar { width: 4px; }
-  .feed-list::-webkit-scrollbar-track { background: transparent; }
-  .feed-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-  .trade-item {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 12px; border-radius: 8px; margin-bottom: 4px;
-    border: 1px solid transparent; cursor: pointer;
-    transition: all 0.15s ease; animation: slideIn 0.3s ease;
-  }
-  .trade-item:hover { border-color: var(--border); background: rgba(255,255,255,0.03); }
-  .trade-item.profit { border-left: 3px solid var(--green); }
-  .trade-item.loss { border-left: 3px solid var(--red); }
-  .trade-item.new { animation: flash 0.5s ease; }
-  @keyframes slideIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
-  @keyframes flash { 0%,100% { background:transparent; } 50% { background:rgba(59,130,246,0.1); } }
-
-  .trade-left { display: flex; align-items: center; gap: 10px; }
-  .trade-icon { font-size: 20px; }
-  .trade-info { display: flex; flex-direction: column; }
-  .trade-name { font-size: 13px; font-weight: 500; }
-  .trade-detail { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  .trade-time { font-size: 10px; color: var(--muted); margin-top: 1px; }
-  .trade-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-  .trade-pnl { font-size: 15px; font-weight: 700; }
-  .trade-pnl.profit { color: var(--green); }
-  .trade-pnl.loss { color: var(--red); }
-  .log-link { font-size: 10px; color: var(--blue); text-decoration: none; padding: 2px 6px; border-radius: 4px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); }
-  .log-link:hover { background: rgba(59,130,246,0.2); }
-
-  /* RIGHT PANEL */
-  .right-col { display: flex; flex-direction: column; gap: 16px; }
-
-  /* BALANCE CHART */
-  .chart-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-  canvas { width: 100%; display: block; }
-
-  /* SURVIVAL BAR */
-  .survival-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-  .survival-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; }
-  .survival-bar { height: 12px; background: var(--border); border-radius: 6px; overflow: hidden; }
-  .survival-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease, background 0.5s ease; }
-  .survival-pct { font-size: 12px; color: var(--muted); margin-top: 6px; text-align: right; }
-
-  /* STATS */
-  .stats-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; flex: 1; }
-  .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-  .stat-row:last-child { border: none; }
-  .stat-key { color: var(--muted); }
-  .stat-val { font-weight: 600; }
-
-  /* LOG MODAL */
-  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
-  .modal.open { display: flex; }
-  .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 24px; max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto; }
-  .modal-box h3 { font-size: 15px; margin-bottom: 16px; }
-  .modal-box pre { font-size: 12px; color: var(--text); white-space: pre-wrap; line-height: 1.6; }
-  .modal-close { float: right; cursor: pointer; color: var(--muted); font-size: 20px; }
-
-  /* DEATH SCREEN */
-  .death-overlay { display: none; position: fixed; inset: 0; background: rgba(239,68,68,0.08); z-index: 50; pointer-events: none; }
-  .death-overlay.show { display: block; animation: deathFlash 1s ease 3; }
-  @keyframes deathFlash { 0%,100%{opacity:0} 50%{opacity:1} }
-
-  .runtime { font-size: 11px; color: var(--muted); }
-
-  /* Connecting */
-  .connecting { position: fixed; bottom: 20px; right: 20px; background: var(--yellow); color: #000; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; display: none; }
-  .connecting.show { display: block; }
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0e1a;--panel:#111827;--border:#1f2937;--green:#10b981;--red:#ef4444;--blue:#3b82f6;--yellow:#f59e0b;--purple:#8b5cf6;--text:#e5e7eb;--muted:#6b7280;--cyan:#06b6d4}
+body{background:var(--bg);color:var(--text);font-family:'SF Mono','Fira Code',monospace;font-size:13px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid var(--border);background:var(--panel)}
+.topbar h1{font-size:14px;font-weight:700}
+.badge{padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(245,158,11,.15);color:var(--yellow);border:1px solid rgba(245,158,11,.3)}
+.badge.live{background:rgba(239,68,68,.15);color:var(--red);border-color:rgba(239,68,68,.3)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1.5s infinite;margin-right:5px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:12px 20px}
+.m{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px}
+.ml{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
+.mv{font-size:22px;font-weight:700}.mv.g{color:var(--green)}.mv.r{color:var(--red)}.mv.b{color:var(--blue)}.mv.y{color:var(--yellow)}.mv.p{color:var(--purple)}
+.ms{font-size:11px;color:var(--muted);margin-top:3px}
+.grid{display:grid;grid-template-columns:1fr 1fr 360px;gap:10px;padding:0 20px 20px;height:calc(100vh - 185px)}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.ph{padding:9px 13px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;flex-shrink:0}
+.pb{flex:1;overflow-y:auto;padding:7px}.pb::-webkit-scrollbar{width:3px}.pb::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+/* signals */
+.sc{padding:9px 11px;border-radius:8px;margin-bottom:5px;border:1px solid var(--border)}
+.sc.BUY{border-left:3px solid var(--green)}.sc.SELL{border-left:3px solid var(--red)}.sc.HOLD{border-left:3px solid var(--muted)}.sc.WAIT{border-left:3px solid var(--yellow)}
+.sb{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
+.sb.BUY{background:rgba(16,185,129,.15);color:var(--green)}.sb.SELL{background:rgba(239,68,68,.15);color:var(--red)}.sb.HOLD{background:rgba(107,114,128,.15);color:var(--muted)}.sb.WAIT{background:rgba(245,158,11,.15);color:var(--yellow)}
+/* positions */
+.pc{padding:9px 11px;border-radius:8px;margin-bottom:5px;border:1px solid var(--border);cursor:pointer}
+.pc:hover{background:rgba(255,255,255,.02)}
+/* trades */
+.ti{padding:8px 11px;border-radius:7px;margin-bottom:4px;border:1px solid transparent;cursor:pointer;animation:si .3s ease}
+.ti:hover{border-color:var(--border);background:rgba(255,255,255,.02)}
+.ti.win{border-left:3px solid var(--green)}.ti.lose{border-left:3px solid var(--red)}
+@keyframes si{from{opacity:0;transform:translateX(-5px)}to{opacity:1;transform:translateX(0)}}
+.ll{font-size:10px;color:var(--blue);padding:1px 5px;border-radius:3px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2)}
+/* debug */
+.dc{background:#0d1117;border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.dl{flex:1;overflow-y:auto;padding:8px;font-size:10px;line-height:1.7}.dl::-webkit-scrollbar{width:3px}.dl::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.d-TRACE{color:#4b5563}.d-DATA{color:var(--cyan)}.d-VERBOSE{color:#60a5fa}.d-INFO{color:var(--yellow)}.d-TRADE{color:var(--green)}.d-ERROR{color:var(--red)}.d-DEATH{color:var(--purple)}
+.cfgbar{display:flex;gap:10px;padding:7px 13px;border-top:1px solid var(--border);background:rgba(0,0,0,.2);font-size:10px;color:var(--muted)}
+.cfgbar span{color:var(--text);font-weight:600}
+/* modal */
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center}
+.modal.open{display:flex}
+.mb{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:20px;max-width:550px;width:90%;max-height:80vh;overflow-y:auto}
+.mb h3{font-size:14px;margin-bottom:12px}
+.mb pre{font-size:11px;white-space:pre-wrap;line-height:1.7;background:#0d1117;padding:12px;border-radius:8px}
 </style>
 </head>
 <body>
-
-<div class="death-overlay" id="deathOverlay"></div>
-
-<!-- TOP BAR -->
 <div class="topbar">
-  <h1>🤖 Survival Agent · 虚拟交易实时面板</h1>
-  <div style="display:flex;align-items:center;gap:16px;">
-    <span class="runtime" id="runtime">运行中...</span>
-    <div class="alive-badge alive" id="aliveBadge">
-      <div class="pulse"></div>
-      <span id="aliveText">存活中</span>
-    </div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <h1>🤖 Survival Agent v2</h1>
+    <span class="badge" id="modeBadge">PAPER</span>
+    <span style="font-size:11px;color:var(--muted)">OKX + 新浪财经 · 真实行情</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:14px;font-size:11px;color:var(--muted)">
+    Scan #<span id="sc">0</span> &nbsp;·&nbsp; <span id="st">--</span>
+    &nbsp;&nbsp;<span class="dot" id="dot"></span><span id="at">连接中...</span>
   </div>
 </div>
-
-<!-- METRICS -->
 <div class="metrics">
-  <div class="metric">
-    <div class="metric-label">💰 当前余额</div>
-    <div class="metric-value green" id="balance">¥10,000</div>
-    <div class="metric-sub" id="pnl">初始: ¥10,000</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">📈 累计盈亏</div>
-    <div class="metric-value" id="pnlVal">¥0.00</div>
-    <div class="metric-sub" id="pnlPct">0.00%</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">🔄 交易次数</div>
-    <div class="metric-value blue" id="tradeCount">0</div>
-    <div class="metric-sub" id="winRate">胜率: --</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">⏱️ 运行时长</div>
-    <div class="metric-value yellow" id="runtimeBig">00:00</div>
-    <div class="metric-sub">每 2.5s 一笔交易</div>
-  </div>
+  <div class="m"><div class="ml">💰 余额</div><div class="mv g" id="bal">¥--</div><div class="ms" id="bsub">初始 ¥10,000</div></div>
+  <div class="m"><div class="ml">📈 盈亏</div><div class="mv" id="pnl">¥0.00</div><div class="ms" id="pp">0.00%</div></div>
+  <div class="m"><div class="ml">📋 持仓</div><div class="mv p" id="pos">0</div><div class="ms">最多 3 个</div></div>
+  <div class="m"><div class="ml">🔄 成交</div><div class="mv b" id="tc">0</div><div class="ms" id="wr">胜率 --</div></div>
+  <div class="m"><div class="ml">⏱️ 运行</div><div class="mv y" id="rt">00:00</div><div class="ms">每 8s 扫描</div></div>
 </div>
-
-<!-- MAIN -->
-<div class="main">
-  <!-- FEED -->
-  <div class="feed-panel">
-    <div class="panel-header">
-      <span>📡</span> 实时交易流 · 点击查看日志
-      <span style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:400" id="feedCount">0 笔</span>
+<div class="grid">
+  <!-- signals -->
+  <div class="panel">
+    <div class="ph">📡 信号 <span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:auto">BP3: generateSignal()</span></div>
+    <div class="pb" id="sl"><div style="color:var(--muted);text-align:center;padding:30px">等待扫描...</div></div>
+  </div>
+  <!-- mid col -->
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div class="panel" style="flex:0 0 auto;max-height:210px">
+      <div class="ph">📂 持仓 <span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:auto">BP5 open · BP6 exit · BP7 close</span></div>
+      <div class="pb" id="pl"><div style="color:var(--muted);text-align:center;padding:20px">暂无持仓</div></div>
     </div>
-    <div class="feed-list" id="feedList">
-      <div style="text-align:center;color:var(--muted);padding:40px;font-size:13px;">等待第一笔交易...</div>
+    <div class="panel" style="flex:1">
+      <div class="ph">⚡ 成交 <span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:auto" id="tcb">0 笔</span></div>
+      <div class="pb" id="tl"><div style="color:var(--muted);text-align:center;padding:30px">等待成交...</div></div>
     </div>
   </div>
-
-  <!-- RIGHT COL -->
-  <div class="right-col">
-    <!-- CHART -->
-    <div class="chart-panel">
-      <div class="panel-header"><span>📊</span> 余额走势</div>
-      <canvas id="chart" height="140"></canvas>
+  <!-- right -->
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;flex-shrink:0">
+      <div class="ph">📊 余额曲线</div>
+      <canvas id="chart" height="110"></canvas>
     </div>
-
-    <!-- SURVIVAL -->
-    <div class="survival-panel">
-      <div class="survival-label">🩺 生存状态</div>
-      <div class="survival-bar">
-        <div class="survival-fill" id="survivalFill" style="width:100%;background:var(--green)"></div>
+    <div class="dc" style="flex:1">
+      <div class="ph" style="background:#0d1117;justify-content:space-between">
+        🔬 Debug <span style="font-size:10px;color:var(--muted);font-weight:400">BP0~BP7</span>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="df" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 5px;font-size:10px">
+            <option>ALL</option><option>TRADE</option><option>INFO</option><option>EXEC</option><option>SIGNAL</option><option>ERROR</option>
+          </select>
+          <button onclick="clearDbg()" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:4px;padding:2px 7px;cursor:pointer;font-size:10px">清</button>
+        </div>
       </div>
-      <div class="survival-pct" id="survivalPct">100.0% 生命值</div>
-    </div>
-
-    <!-- STATS -->
-    <div class="stats-panel">
-      <div class="stat-row"><span class="stat-key">最大单笔盈利</span><span class="stat-val green" id="maxProfit">--</span></div>
-      <div class="stat-row"><span class="stat-key">最大单笔亏损</span><span class="stat-val red" id="maxLoss">--</span></div>
-      <div class="stat-row"><span class="stat-key">最活跃策略</span><span class="stat-val" id="topStrategy">--</span></div>
-      <div class="stat-row"><span class="stat-key">今日日志</span><span class="stat-val blue" id="todayLog">--</span></div>
+      <div class="dl" id="dbg"></div>
+      <div class="cfgbar">
+        模式:<span id="cm">--</span> &nbsp; Debug:<span id="cl">--</span> &nbsp; 策略:<span>动量+MA</span> &nbsp; 阈值:<span>±0.4%</span>
+      </div>
     </div>
   </div>
 </div>
-
-<!-- LOG MODAL -->
 <div class="modal" id="modal">
-  <div class="modal-box">
-    <span class="modal-close" onclick="closeModal()">✕</span>
-    <h3 id="modalTitle">交易日志</h3>
-    <pre id="modalContent">加载中...</pre>
+  <div class="mb">
+    <button onclick="closeModal()" style="float:right;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px">✕</button>
+    <h3 id="mt">日志</h3><pre id="mc">加载中...</pre>
   </div>
 </div>
-
-<div class="connecting" id="connecting">⚡ 重连中...</div>
-
 <script>
-const API = '';
-let balanceHistory = [];
-let strategyCount = {};
-let maxProfit = -Infinity, maxLoss = Infinity;
-let startTime = Date.now();
-let tradeCount = 0;
-let connected = false;
-
-// ─── SSE ─────────────────────────────────────────────────────────────────────
-function connect() {
-  const es = new EventSource(API + '/stream');
-
-  es.onopen = () => {
-    connected = true;
-    document.getElementById('connecting').classList.remove('show');
+let balHist=[], allDbg=[], startTime=Date.now();
+function connect(){
+  const es=new EventSource('/stream');
+  es.onmessage=e=>{
+    const d=JSON.parse(e.data);
+    if(d.type==='init')init(d.state);
+    else if(d.type==='scan')onScan(d);
+    else if(d.type==='trade')onTrade(d.trade,d.balance);
+    else if(d.type==='death')onDeath();
+    else if(d.type==='ping')setBal(d.balance);
   };
-
-  es.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-    if (data.type === 'init') {
-      initState(data.state);
-    } else if (data.type === 'trade') {
-      addTrade(data.trade);
-      updateMetrics(data.trade);
-    } else if (data.type === 'death') {
-      handleDeath();
-    } else if (data.type === 'ping') {
-      updateBalance(data.balance, data.alive);
-    }
-  };
-
-  es.onerror = () => {
-    connected = false;
-    document.getElementById('connecting').classList.add('show');
-    es.close();
-    setTimeout(connect, 3000);
-  };
+  es.onerror=()=>{addDbg('ERROR','CONN','disconnected');setTimeout(connect,3000);es.close();};
 }
-
-// ─── INIT ─────────────────────────────────────────────────────────────────────
-function initState(s) {
-  startTime = Date.now() - s.runtime * 1000;
-  balanceHistory = [s.balance];
-  tradeCount = s.tradeCount;
-
-  document.getElementById('balance').textContent = fmt(s.balance);
-  document.getElementById('tradeCount').textContent = s.tradeCount;
-  document.getElementById('winRate').textContent = `胜率: ${s.winRate}%`;
-  setPnl(s.pnl, s.pnlPct);
-  setSurvival(s.balance, s.initialBalance);
-
-  if (!s.alive) handleDeath(false);
-
-  // Load recent trades
-  const feedList = document.getElementById('feedList');
-  feedList.innerHTML = '';
-  s.trades.forEach(t => renderTrade(t, false));
-  s.trades.forEach(t => {
-    strategyCount[t.strategy] = (strategyCount[t.strategy] || 0) + 1;
-    if (t.netProfit > maxProfit) maxProfit = t.netProfit;
-    if (t.netProfit < maxLoss) maxLoss = t.netProfit;
-  });
-  updateStats();
-  drawChart();
-}
-
-// ─── TRADE ───────────────────────────────────────────────────────────────────
-function addTrade(trade) {
-  const feedList = document.getElementById('feedList');
-  if (feedList.querySelector('.no-trades')) feedList.innerHTML = '';
-
-  renderTrade(trade, true);
-
-  tradeCount++;
-  strategyCount[trade.strategy] = (strategyCount[trade.strategy] || 0) + 1;
-  if (trade.netProfit > maxProfit) maxProfit = trade.netProfit;
-  if (trade.netProfit < maxLoss) maxLoss = trade.netProfit;
-
-  balanceHistory.push(trade.balance);
-  if (balanceHistory.length > 60) balanceHistory.shift();
-
-  document.getElementById('feedCount').textContent = `${tradeCount} 笔`;
-  drawChart();
-  updateStats();
-}
-
-function renderTrade(trade, isNew) {
-  const feedList = document.getElementById('feedList');
-  const sign = trade.netProfit >= 0 ? '+' : '';
-  const cls = trade.netProfit >= 0 ? 'profit' : 'loss';
-
-  const el = document.createElement('div');
-  el.className = `trade-item ${cls}${isNew ? ' new' : ''}`;
-  el.onclick = () => openLog(trade.logFile, trade.strategy);
-
-  el.innerHTML = `
-    <div class="trade-left">
-      <div class="trade-icon">${trade.icon}</div>
-      <div class="trade-info">
-        <div class="trade-name">${trade.strategy}</div>
-        <div class="trade-detail">${trade.detail}</div>
-        <div class="trade-time">${trade.timestamp} · 计算成本 ¥${trade.computeCost.toFixed(2)}</div>
-      </div>
-    </div>
-    <div class="trade-right">
-      <div class="trade-pnl ${cls}">${sign}¥${trade.netProfit.toFixed(2)}</div>
-      <a class="log-link" href="#" onclick="event.stopPropagation();openLog('${trade.logFile}','${trade.strategy}');return false;">📄 日志</a>
-    </div>`;
-
-  feedList.insertBefore(el, feedList.firstChild);
-
-  // Keep max 100 items in DOM
-  while (feedList.children.length > 100) feedList.removeChild(feedList.lastChild);
-}
-
-function updateMetrics(trade) {
-  document.getElementById('balance').textContent = fmt(trade.balance);
-  document.getElementById('tradeCount').textContent = tradeCount;
-  setPnl(trade.balance - 10000, ((trade.balance - 10000) / 10000 * 100).toFixed(2));
-  setSurvival(trade.balance, 10000);
-}
-
-function updateBalance(bal, alive) {
-  document.getElementById('balance').textContent = fmt(bal);
-}
-
-function setPnl(pnl, pct) {
-  const el = document.getElementById('pnlVal');
-  const sign = pnl >= 0 ? '+' : '';
-  el.textContent = `${sign}¥${parseFloat(pnl).toFixed(2)}`;
-  el.className = `metric-value ${pnl >= 0 ? 'green' : 'red'}`;
-  document.getElementById('pnlPct').textContent = `${sign}${pct}%`;
-}
-
-function setSurvival(balance, initial) {
-  const pct = Math.max(0, Math.min(100, balance / initial * 100));
-  const fill = document.getElementById('survivalFill');
-  fill.style.width = pct + '%';
-  fill.style.background = pct > 50 ? 'var(--green)' : pct > 20 ? 'var(--yellow)' : 'var(--red)';
-  document.getElementById('survivalPct').textContent = `${pct.toFixed(1)}% 生命值`;
-}
-
-function updateStats() {
-  if (maxProfit !== -Infinity) document.getElementById('maxProfit').textContent = `+¥${maxProfit.toFixed(2)}`;
-  if (maxLoss !== Infinity) document.getElementById('maxLoss').textContent = `¥${maxLoss.toFixed(2)}`;
-
-  const top = Object.entries(strategyCount).sort((a,b) => b[1]-a[1])[0];
-  if (top) document.getElementById('topStrategy').textContent = `${top[0]} (${top[1]}次)`;
-
-  const today = new Date().toISOString().slice(0,10);
-  document.getElementById('todayLog').textContent = `${today}.log`;
-  document.getElementById('todayLog').style.cursor = 'pointer';
-}
-
-function handleDeath(animate = true) {
-  const badge = document.getElementById('aliveBadge');
-  badge.className = 'alive-badge dead';
-  document.getElementById('aliveText').textContent = '已死亡 💀';
-  document.getElementById('balance').style.color = 'var(--red)';
-  if (animate) {
-    document.getElementById('deathOverlay').classList.add('show');
-  }
-}
-
-// ─── CHART ───────────────────────────────────────────────────────────────────
-function drawChart() {
-  const canvas = document.getElementById('chart');
-  const ctx = canvas.getContext('2d');
-  const W = canvas.offsetWidth;
-  const H = 140;
-  canvas.width = W * devicePixelRatio;
-  canvas.height = H * devicePixelRatio;
-  ctx.scale(devicePixelRatio, devicePixelRatio);
-
-  if (balanceHistory.length < 2) return;
-
-  const min = Math.min(...balanceHistory) * 0.998;
-  const max = Math.max(...balanceHistory) * 1.002;
-  const pad = { t: 12, r: 12, b: 20, l: 60 };
-  const W2 = W - pad.l - pad.r;
-  const H2 = H - pad.t - pad.b;
-
-  ctx.clearRect(0, 0, W, H);
-
-  const xOf = i => pad.l + (i / (balanceHistory.length - 1)) * W2;
-  const yOf = v => pad.t + H2 - ((v - min) / (max - min)) * H2;
-
-  // Grid
-  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = pad.t + (H2 / 4) * i;
-    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
-    const val = max - ((max - min) / 4) * i;
-    ctx.fillStyle = '#6b7280'; ctx.font = '10px monospace';
-    ctx.fillText('¥' + Math.round(val).toLocaleString(), 4, y + 4);
-  }
-
-  // Line
-  const last = balanceHistory[balanceHistory.length - 1];
-  const color = last >= 10000 ? '#10b981' : '#ef4444';
-
-  // Fill
-  const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + H2);
-  grad.addColorStop(0, color + '33');
-  grad.addColorStop(1, color + '00');
-  ctx.beginPath();
-  ctx.moveTo(xOf(0), yOf(balanceHistory[0]));
-  balanceHistory.forEach((v, i) => ctx.lineTo(xOf(i), yOf(v)));
-  ctx.lineTo(xOf(balanceHistory.length - 1), pad.t + H2);
-  ctx.lineTo(xOf(0), pad.t + H2);
-  ctx.closePath();
-  ctx.fillStyle = grad; ctx.fill();
-
-  // Line stroke
-  ctx.beginPath();
-  ctx.moveTo(xOf(0), yOf(balanceHistory[0]));
-  balanceHistory.forEach((v, i) => ctx.lineTo(xOf(i), yOf(v)));
-  ctx.strokeStyle = color; ctx.lineWidth = 2;
-  ctx.stroke();
-
-  // Last dot
-  const lx = xOf(balanceHistory.length - 1), ly = yOf(last);
-  ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI * 2);
-  ctx.fillStyle = color; ctx.fill();
-}
-
-// ─── LOG MODAL ────────────────────────────────────────────────────────────────
-function openLog(logFile, name) {
-  document.getElementById('modalTitle').textContent = `📄 交易日志 · ${name}`;
-  document.getElementById('modalContent').textContent = '加载中...';
-  document.getElementById('modal').classList.add('open');
-
-  fetch(API + '/api/log/' + logFile)
-    .then(r => r.json())
-    .then(data => {
-      document.getElementById('modalContent').textContent = JSON.stringify(data, null, 2);
-    })
-    .catch(() => {
-      document.getElementById('modalContent').textContent = '日志文件不存在或加载失败';
+function init(s){
+  startTime=Date.now()-s.runtime*1000;
+  balHist=[s.balance];
+  updateM(s);
+  if(s.trades?.length){document.getElementById('tl').innerHTML='';s.trades.forEach(t=>renderTrade(t,false));document.getElementById('tcb').textContent=s.tradeCount+' 笔';}
+  if(s.signals)renderSigs(s.signals);
+  if(s.positions)renderPos(s.positions,{});
+  const dry=s.config?.DRY_RUN;
+  document.getElementById('cm').textContent=dry?'PAPER':'LIVE';
+  document.getElementById('cl').textContent=s.config?.DEBUG_LEVEL;
+  document.getElementById('modeBadge').textContent=dry?'PAPER':'LIVE';
+  document.getElementById('modeBadge').className='badge'+(dry?'':' live');
+  document.getElementById('at').textContent=s.alive?'存活':'💀 死亡';
+  fetch('/api/debug').then(r=>r.text()).then(t=>{
+    t.split('\n').filter(Boolean).forEach(l=>{
+      const m=l.match(/\[([^\]]+)\] \[([^\]]+)\] \[([^\]]+)\] (.*)/);
+      if(m)addDbg(m[2].trim(),m[3].trim(),m[4],false);
     });
+    scrollDbg();
+  });
 }
-
-function closeModal() {
-  document.getElementById('modal').classList.remove('open');
+function onScan(d){
+  renderSigs(d.signals);
+  renderPos(d.positions,d.signals);
+  setBal(d.balance);
+  document.getElementById('sc').textContent=(parseInt(document.getElementById('sc').textContent||0)+1);
+  document.getElementById('st').textContent=new Date().toLocaleTimeString();
+  document.getElementById('pos').textContent=Object.keys(d.positions).length;
 }
-
-document.getElementById('modal').onclick = (e) => {
-  if (e.target === document.getElementById('modal')) closeModal();
+function onTrade(t,b){
+  renderTrade(t,true);
+  balHist.push(parseFloat(b));
+  if(balHist.length>80)balHist.shift();
+  drawChart();
+  document.getElementById('tcb').textContent=document.querySelectorAll('.ti').length+' 笔';
+  addDbg('TRADE','CLOSE',`${t.side} ${t.sym} | PnL ${parseFloat(t.pnl)>=0?'+':''}¥${parseFloat(t.pnl).toFixed(2)} (${t.pnlPct}%) | ${t.reason}`);
+}
+function onDeath(){
+  const dot=document.getElementById('dot');
+  dot.style.background='var(--red)';dot.style.animation='none';
+  document.getElementById('at').textContent='💀 已死亡';
+  addDbg('DEATH','AGENT','Balance=0. Agent terminated.');
+}
+function setBal(b){
+  document.getElementById('bal').textContent='¥'+parseFloat(b).toLocaleString('zh',{maximumFractionDigits:2});
+}
+function updateM(s){
+  const bal=parseFloat(s.balance),ini=parseFloat(s.initialBalance);
+  const pnl=bal-ini;
+  setBal(bal);
+  document.getElementById('bal').className='mv '+(bal>=ini?'g':'r');
+  const pe=document.getElementById('pnl');
+  pe.textContent=(pnl>=0?'+':'')+'¥'+pnl.toFixed(2);
+  pe.className='mv '+(pnl>=0?'g':'r');
+  document.getElementById('pp').textContent=(pnl>=0?'+':'')+s.pnlPct+'%';
+  document.getElementById('tc').textContent=s.tradeCount;
+  document.getElementById('wr').textContent='胜率 '+s.winRate+'%';
+  document.getElementById('pos').textContent=Object.keys(s.positions||{}).length;
+}
+function renderSigs(sigs){
+  const el=document.getElementById('sl');el.innerHTML='';
+  for(const[sym,s]of Object.entries(sigs)){
+    const div=document.createElement('div');
+    div.className=`sc ${s.signal}`;
+    const mom=s.momentum?(s.momentum*100).toFixed(3):'--';
+    div.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+        <strong style="font-size:13px">${s.name}</strong>
+        <span class="sb ${s.signal}">${s.signal}${s.strength?' x'+s.strength:''}</span>
+      </div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:4px">¥${parseFloat(s.price||0).toLocaleString('zh',{maximumFractionDigits:4})}</div>
+      <div style="font-size:11px;color:var(--muted)">${s.reason}</div>
+      <div style="display:flex;gap:12px;margin-top:5px;font-size:11px;color:var(--muted)">
+        <span>动量 <strong style="color:${parseFloat(mom)>0?'var(--green)':'var(--red)'}">${mom}%</strong></span>
+        <span>MA5 <strong>${s.ma5?parseFloat(s.ma5).toFixed(2):'--'}</strong></span>
+        <span>MA10 <strong>${s.ma10?parseFloat(s.ma10).toFixed(2):'--'}</strong></span>
+      </div>`;
+    el.appendChild(div);
+    if(s.signal==='BUY'||s.signal==='SELL')addDbg('INFO','SIGNAL',`${s.name}: ${s.signal} | ${s.reason}`);
+  }
+}
+function renderPos(pos,quotes){
+  const el=document.getElementById('pl');
+  const ks=Object.keys(pos);
+  if(!ks.length){el.innerHTML='<div style="color:var(--muted);text-align:center;padding:20px;font-size:12px">暂无持仓</div>';return;}
+  el.innerHTML='';
+  ks.forEach(sym=>{
+    const p=pos[sym];
+    const cur=quotes[sym]?.price||p.price;
+    const upnl=p.side==='BUY'?(cur-p.price)*p.qty:(p.price-cur)*p.qty;
+    const div=document.createElement('div');div.className='pc';
+    div.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+        <strong>${p.name}</strong>
+        <span style="padding:1px 7px;border-radius:8px;font-size:11px;font-weight:700;background:${p.side==='BUY'?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${p.side==='BUY'?'var(--green)':'var(--red)'}">${p.side}</span>
+        <span style="font-weight:700;font-size:13px;color:${upnl>=0?'var(--green)':'var(--red)'}">${upnl>=0?'+':''}¥${upnl.toFixed(2)}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted)">入场 ¥${p.price.toFixed(4)} · SL ¥${p.stopLoss.toFixed(4)} · TP ¥${p.takeProfit.toFixed(4)}<br>${p.signal}</div>`;
+    el.appendChild(div);
+  });
+}
+function renderTrade(t,isNew){
+  const el=document.getElementById('tl');
+  if(el.querySelector('[style*="等待"]'))el.innerHTML='';
+  const w=parseFloat(t.pnl)>=0;
+  const div=document.createElement('div');
+  div.className=`ti ${w?'win':'lose'}`;
+  div.onclick=()=>openLog(t.id+'.json',t.sym);
+  div.innerHTML=`
+    <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+      <span><strong>${t.side}</strong> ${t.name}</span>
+      <span style="font-weight:700;color:${w?'var(--green)':'var(--red)'}">${w?'+':''}¥${parseFloat(t.pnl).toFixed(2)} (${t.pnlPct}%)</span>
+    </div>
+    <div style="font-size:10px;color:var(--muted)">
+      ¥${parseFloat(t.entryPrice).toFixed(4)} → ¥${parseFloat(t.exitPrice).toFixed(4)} · ${t.holdingMinutes}min · ${t.reason}<br>
+      <a class="ll" href="#" onclick="event.stopPropagation();openLog('${t.id}.json','${t.sym}');return false">📄 完整日志</a>
+      &nbsp;<span>${t.closeTime?.slice(11,19)||''}</span>
+    </div>`;
+  el.insertBefore(div,el.firstChild);
+  while(el.children.length>100)el.removeChild(el.lastChild);
+}
+function addDbg(level,tag,msg,scroll=true){
+  const filter=document.getElementById('df').value;
+  allDbg.push({level,tag,msg,ts:new Date().toLocaleTimeString()});
+  if(allDbg.length>500)allDbg.shift();
+  const show=filter==='ALL'||filter===level||filter===tag;
+  if(!show)return;
+  const el=document.getElementById('dbg');
+  const d=document.createElement('div');
+  d.className=`d-${level}`;
+  d.textContent=`${new Date().toLocaleTimeString()} [${level}][${tag}] ${msg}`;
+  el.appendChild(d);
+  while(el.children.length>300)el.removeChild(el.firstChild);
+  if(scroll)scrollDbg();
+}
+function scrollDbg(){const e=document.getElementById('dbg');e.scrollTop=e.scrollHeight;}
+function clearDbg(){document.getElementById('dbg').innerHTML='';}
+document.getElementById('df').onchange=()=>{
+  const el=document.getElementById('dbg');el.innerHTML='';
+  const f=document.getElementById('df').value;
+  allDbg.forEach(d=>{
+    if(f!=='ALL'&&f!==d.level&&f!==d.tag)return;
+    const div=document.createElement('div');div.className=`d-${d.level}`;
+    div.textContent=`${d.ts} [${d.level}][${d.tag}] ${d.msg}`;
+    el.appendChild(div);
+  });
+  scrollDbg();
 };
-
-// ─── RUNTIME COUNTER ─────────────────────────────────────────────────────────
-setInterval(() => {
-  const sec = Math.floor((Date.now() - startTime) / 1000);
-  const m = Math.floor(sec / 60).toString().padStart(2, '0');
-  const s = (sec % 60).toString().padStart(2, '0');
-  document.getElementById('runtimeBig').textContent = `${m}:${s}`;
-  document.getElementById('runtime').textContent = `运行 ${m}m${s}s`;
-}, 1000);
-
-// ─── START ────────────────────────────────────────────────────────────────────
+function drawChart(){
+  const c=document.getElementById('chart');
+  const ctx=c.getContext('2d');
+  const W=c.offsetWidth,H=110;
+  c.width=W*devicePixelRatio;c.height=H*devicePixelRatio;
+  ctx.scale(devicePixelRatio,devicePixelRatio);
+  if(balHist.length<2)return;
+  const min=Math.min(...balHist)*.998,max=Math.max(...balHist)*1.002;
+  const p={t:8,r:8,b:16,l:52};
+  const W2=W-p.l-p.r,H2=H-p.t-p.b;
+  ctx.clearRect(0,0,W,H);
+  const xOf=i=>p.l+(i/(balHist.length-1))*W2;
+  const yOf=v=>p.t+H2-((v-min)/(max-min))*H2;
+  ctx.strokeStyle='#1f2937';ctx.lineWidth=1;
+  for(let i=0;i<=3;i++){
+    const y=p.t+(H2/3)*i;
+    ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(W-p.r,y);ctx.stroke();
+    const val=max-((max-min)/3)*i;
+    ctx.fillStyle='#6b7280';ctx.font='9px monospace';
+    ctx.fillText('¥'+Math.round(val).toLocaleString(),2,y+3);
+  }
+  const last=balHist[balHist.length-1];
+  const color=last>=10000?'#10b981':'#ef4444';
+  const grad=ctx.createLinearGradient(0,p.t,0,p.t+H2);
+  grad.addColorStop(0,color+'33');grad.addColorStop(1,color+'00');
+  ctx.beginPath();ctx.moveTo(xOf(0),yOf(balHist[0]));
+  balHist.forEach((v,i)=>ctx.lineTo(xOf(i),yOf(v)));
+  ctx.lineTo(xOf(balHist.length-1),p.t+H2);ctx.lineTo(xOf(0),p.t+H2);
+  ctx.closePath();ctx.fillStyle=grad;ctx.fill();
+  ctx.beginPath();ctx.moveTo(xOf(0),yOf(balHist[0]));
+  balHist.forEach((v,i)=>ctx.lineTo(xOf(i),yOf(v)));
+  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
+  const lx=xOf(balHist.length-1),ly=yOf(last);
+  ctx.beginPath();ctx.arc(lx,ly,3,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
+}
+function openLog(f,sym){
+  document.getElementById('mt').textContent='📄 交易日志 · '+sym;
+  document.getElementById('mc').textContent='加载中...';
+  document.getElementById('modal').classList.add('open');
+  fetch('/api/log/'+f).then(r=>r.json()).then(d=>{document.getElementById('mc').textContent=JSON.stringify(d,null,2);}).catch(()=>{document.getElementById('mc').textContent='日志不存在';});
+}
+function closeModal(){document.getElementById('modal').classList.remove('open');}
+document.getElementById('modal').onclick=e=>{if(e.target===document.getElementById('modal'))closeModal();};
+setInterval(()=>{
+  const s=Math.floor((Date.now()-startTime)/1000);
+  const m=Math.floor(s/60).toString().padStart(2,'0');
+  document.getElementById('rt').textContent=m+':'+(s%60).toString().padStart(2,'0');
+},1000);
 connect();
-window.addEventListener('resize', drawChart);
+window.addEventListener('resize',drawChart);
 </script>
 </body>
 </html>
