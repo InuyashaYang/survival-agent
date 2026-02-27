@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🤖 Survival Agent · 实时交易面板</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0a0e1a; --panel: #111827; --border: #1f2937;
+    --green: #10b981; --red: #ef4444; --blue: #3b82f6;
+    --yellow: #f59e0b; --text: #e5e7eb; --muted: #6b7280;
+    --profit: #10b981; --loss: #ef4444;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; min-height: 100vh; }
+
+  /* TOP BAR */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .topbar h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.05em; }
+  .alive-badge {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  }
+  .alive-badge.alive { background: rgba(16,185,129,0.15); color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
+  .alive-badge.dead { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 1.5s infinite; }
+  .dead .pulse { background: var(--red); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.8)} }
+
+  /* METRICS */
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px 24px; }
+  .metric { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+  .metric-value { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+  .metric-value.green { color: var(--green); }
+  .metric-value.red { color: var(--red); }
+  .metric-value.blue { color: var(--blue); }
+  .metric-value.yellow { color: var(--yellow); }
+  .metric-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* MAIN LAYOUT */
+  .main { display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 0 24px 24px; height: calc(100vh - 180px); }
+
+  /* TRADE FEED */
+  .feed-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .panel-header { padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .feed-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .feed-list::-webkit-scrollbar { width: 4px; }
+  .feed-list::-webkit-scrollbar-track { background: transparent; }
+  .feed-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .trade-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-radius: 8px; margin-bottom: 4px;
+    border: 1px solid transparent; cursor: pointer;
+    transition: all 0.15s ease; animation: slideIn 0.3s ease;
+  }
+  .trade-item:hover { border-color: var(--border); background: rgba(255,255,255,0.03); }
+  .trade-item.profit { border-left: 3px solid var(--green); }
+  .trade-item.loss { border-left: 3px solid var(--red); }
+  .trade-item.new { animation: flash 0.5s ease; }
+  @keyframes slideIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes flash { 0%,100% { background:transparent; } 50% { background:rgba(59,130,246,0.1); } }
+
+  .trade-left { display: flex; align-items: center; gap: 10px; }
+  .trade-icon { font-size: 20px; }
+  .trade-info { display: flex; flex-direction: column; }
+  .trade-name { font-size: 13px; font-weight: 500; }
+  .trade-detail { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .trade-time { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .trade-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .trade-pnl { font-size: 15px; font-weight: 700; }
+  .trade-pnl.profit { color: var(--green); }
+  .trade-pnl.loss { color: var(--red); }
+  .log-link { font-size: 10px; color: var(--blue); text-decoration: none; padding: 2px 6px; border-radius: 4px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); }
+  .log-link:hover { background: rgba(59,130,246,0.2); }
+
+  /* RIGHT PANEL */
+  .right-col { display: flex; flex-direction: column; gap: 16px; }
+
+  /* BALANCE CHART */
+  .chart-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  canvas { width: 100%; display: block; }
+
+  /* SURVIVAL BAR */
+  .survival-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .survival-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; }
+  .survival-bar { height: 12px; background: var(--border); border-radius: 6px; overflow: hidden; }
+  .survival-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease, background 0.5s ease; }
+  .survival-pct { font-size: 12px; color: var(--muted); margin-top: 6px; text-align: right; }
+
+  /* STATS */
+  .stats-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; flex: 1; }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .stat-row:last-child { border: none; }
+  .stat-key { color: var(--muted); }
+  .stat-val { font-weight: 600; }
+
+  /* LOG MODAL */
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+  .modal.open { display: flex; }
+  .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 24px; max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto; }
+  .modal-box h3 { font-size: 15px; margin-bottom: 16px; }
+  .modal-box pre { font-size: 12px; color: var(--text); white-space: pre-wrap; line-height: 1.6; }
+  .modal-close { float: right; cursor: pointer; color: var(--muted); font-size: 20px; }
+
+  /* DEATH SCREEN */
+  .death-overlay { display: none; position: fixed; inset: 0; background: rgba(239,68,68,0.08); z-index: 50; pointer-events: none; }
+  .death-overlay.show { display: block; animation: deathFlash 1s ease 3; }
+  @keyframes deathFlash { 0%,100%{opacity:0} 50%{opacity:1} }
+
+  .runtime { font-size: 11px; color: var(--muted); }
+
+  /* Connecting */
+  .connecting { position: fixed; bottom: 20px; right: 20px; background: var(--yellow); color: #000; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; display: none; }
+  .connecting.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="death-overlay" id="deathOverlay"></div>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <h1>🤖 Survival Agent · 虚拟交易实时面板</h1>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <span class="runtime" id="runtime">运行中...</span>
+    <div class="alive-badge alive" id="aliveBadge">
+      <div class="pulse"></div>
+      <span id="aliveText">存活中</span>
+    </div>
+  </div>
+</div>
+
+<!-- METRICS -->
+<div class="metrics">
+  <div class="metric">
+    <div class="metric-label">💰 当前余额</div>
+    <div class="metric-value green" id="balance">¥10,000</div>
+    <div class="metric-sub" id="pnl">初始: ¥10,000</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">📈 累计盈亏</div>
+    <div class="metric-value" id="pnlVal">¥0.00</div>
+    <div class="metric-sub" id="pnlPct">0.00%</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">🔄 交易次数</div>
+    <div class="metric-value blue" id="tradeCount">0</div>
+    <div class="metric-sub" id="winRate">胜率: --</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">⏱️ 运行时长</div>
+    <div class="metric-value yellow" id="runtimeBig">00:00</div>
+    <div class="metric-sub">每 2.5s 一笔交易</div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+  <!-- FEED -->
+  <div class="feed-panel">
+    <div class="panel-header">
+      <span>📡</span> 实时交易流 · 点击查看日志
+      <span style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:400" id="feedCount">0 笔</span>
+    </div>
+    <div class="feed-list" id="feedList">
+      <div style="text-align:center;color:var(--muted);padding:40px;font-size:13px;">等待第一笔交易...</div>
+    </div>
+  </div>
+
+  <!-- RIGHT COL -->
+  <div class="right-col">
+    <!-- CHART -->
+    <div class="chart-panel">
+      <div class="panel-header"><span>📊</span> 余额走势</div>
+      <canvas id="chart" height="140"></canvas>
+    </div>
+
+    <!-- SURVIVAL -->
+    <div class="survival-panel">
+      <div class="survival-label">🩺 生存状态</div>
+      <div class="survival-bar">
+        <div class="survival-fill" id="survivalFill" style="width:100%;background:var(--green)"></div>
+      </div>
+      <div class="survival-pct" id="survivalPct">100.0% 生命值</div>
+    </div>
+
+    <!-- STATS -->
+    <div class="stats-panel">
+      <div class="stat-row"><span class="stat-key">最大单笔盈利</span><span class="stat-val green" id="maxProfit">--</span></div>
+      <div class="stat-row"><span class="stat-key">最大单笔亏损</span><span class="stat-val red" id="maxLoss">--</span></div>
+      <div class="stat-row"><span class="stat-key">最活跃策略</span><span class="stat-val" id="topStrategy">--</span></div>
+      <div class="stat-row"><span class="stat-key">今日日志</span><span class="stat-val blue" id="todayLog">--</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- LOG MODAL -->
+<div class="modal" id="modal">
+  <div class="modal-box">
+    <span class="modal-close" onclick="closeModal()">✕</span>
+    <h3 id="modalTitle">交易日志</h3>
+    <pre id="modalContent">加载中...</pre>
+  </div>
+</div>
+
+<div class="connecting" id="connecting">⚡ 重连中...</div>
+
+<script>
+const API = '';
+let balanceHistory = [];
+let strategyCount = {};
+let maxProfit = -Infinity, maxLoss = Infinity;
+let startTime = Date.now();
+let tradeCount = 0;
+let connected = false;
+
+// ─── SSE ─────────────────────────────────────────────────────────────────────
+function connect() {
+  const es = new EventSource(API + '/stream');
+
+  es.onopen = () => {
+    connected = true;
+    document.getElementById('connecting').classList.remove('show');
+  };
+
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'init') {
+      initState(data.state);
+    } else if (data.type === 'trade') {
+      addTrade(data.trade);
+      updateMetrics(data.trade);
+    } else if (data.type === 'death') {
+      handleDeath();
+    } else if (data.type === 'ping') {
+      updateBalance(data.balance, data.alive);
+    }
+  };
+
+  es.onerror = () => {
+    connected = false;
+    document.getElementById('connecting').classList.add('show');
+    es.close();
+    setTimeout(connect, 3000);
+  };
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+function initState(s) {
+  startTime = Date.now() - s.runtime * 1000;
+  balanceHistory = [s.balance];
+  tradeCount = s.tradeCount;
+
+  document.getElementById('balance').textContent = fmt(s.balance);
+  document.getElementById('tradeCount').textContent = s.tradeCount;
+  document.getElementById('winRate').textContent = `胜率: ${s.winRate}%`;
+  setPnl(s.pnl, s.pnlPct);
+  setSurvival(s.balance, s.initialBalance);
+
+  if (!s.alive) handleDeath(false);
+
+  // Load recent trades
+  const feedList = document.getElementById('feedList');
+  feedList.innerHTML = '';
+  s.trades.forEach(t => renderTrade(t, false));
+  s.trades.forEach(t => {
+    strategyCount[t.strategy] = (strategyCount[t.strategy] || 0) + 1;
+    if (t.netProfit > maxProfit) maxProfit = t.netProfit;
+    if (t.netProfit < maxLoss) maxLoss = t.netProfit;
+  });
+  updateStats();
+  drawChart();
+}
+
+// ─── TRADE ───────────────────────────────────────────────────────────────────
+function addTrade(trade) {
+  const feedList = document.getElementById('feedList');
+  if (feedList.querySelector('.no-trades')) feedList.innerHTML = '';
+
+  renderTrade(trade, true);
+
+  tradeCount++;
+  strategyCount[trade.strategy] = (strategyCount[trade.strategy] || 0) + 1;
+  if (trade.netProfit > maxProfit) maxProfit = trade.netProfit;
+  if (trade.netProfit < maxLoss) maxLoss = trade.netProfit;
+
+  balanceHistory.push(trade.balance);
+  if (balanceHistory.length > 60) balanceHistory.shift();
+
+  document.getElementById('feedCount').textContent = `${tradeCount} 笔`;
+  drawChart();
+  updateStats();
+}
+
+function renderTrade(trade, isNew) {
+  const feedList = document.getElementById('feedList');
+  const sign = trade.netProfit >= 0 ? '+' : '';
+  const cls = trade.netProfit >= 0 ? 'profit' : 'loss';
+
+  const el = document.createElement('div');
+  el.className = `trade-item ${cls}${isNew ? ' new' : ''}`;
+  el.onclick = () => openLog(trade.logFile, trade.strategy);
+
+  el.innerHTML = `
+    <div class="trade-left">
+      <div class="trade-icon">${trade.icon}</div>
+      <div class="trade-info">
+        <div class="trade-name">${trade.strategy}</div>
+        <div class="trade-detail">${trade.detail}</div>
+        <div class="trade-time">${trade.timestamp} · 计算成本 ¥${trade.computeCost.toFixed(2)}</div>
+      </div>
+    </div>
+    <div class="trade-right">
+      <div class="trade-pnl ${cls}">${sign}¥${trade.netProfit.toFixed(2)}</div>
+      <a class="log-link" href="#" onclick="event.stopPropagation();openLog('${trade.logFile}','${trade.strategy}');return false;">📄 日志</a>
+    </div>`;
+
+  feedList.insertBefore(el, feedList.firstChild);
+
+  // Keep max 100 items in DOM
+  while (feedList.children.length > 100) feedList.removeChild(feedList.lastChild);
+}
+
+function updateMetrics(trade) {
+  document.getElementById('balance').textContent = fmt(trade.balance);
+  document.getElementById('tradeCount').textContent = tradeCount;
+  setPnl(trade.balance - 10000, ((trade.balance - 10000) / 10000 * 100).toFixed(2));
+  setSurvival(trade.balance, 10000);
+}
+
+function updateBalance(bal, alive) {
+  document.getElementById('balance').textContent = fmt(bal);
+}
+
+function setPnl(pnl, pct) {
+  const el = document.getElementById('pnlVal');
+  const sign = pnl >= 0 ? '+' : '';
+  el.textContent = `${sign}¥${parseFloat(pnl).toFixed(2)}`;
+  el.className = `metric-value ${pnl >= 0 ? 'green' : 'red'}`;
+  document.getElementById('pnlPct').textContent = `${sign}${pct}%`;
+}
+
+function setSurvival(balance, initial) {
+  const pct = Math.max(0, Math.min(100, balance / initial * 100));
+  const fill = document.getElementById('survivalFill');
+  fill.style.width = pct + '%';
+  fill.style.background = pct > 50 ? 'var(--green)' : pct > 20 ? 'var(--yellow)' : 'var(--red)';
+  document.getElementById('survivalPct').textContent = `${pct.toFixed(1)}% 生命值`;
+}
+
+function updateStats() {
+  if (maxProfit !== -Infinity) document.getElementById('maxProfit').textContent = `+¥${maxProfit.toFixed(2)}`;
+  if (maxLoss !== Infinity) document.getElementById('maxLoss').textContent = `¥${maxLoss.toFixed(2)}`;
+
+  const top = Object.entries(strategyCount).sort((a,b) => b[1]-a[1])[0];
+  if (top) document.getElementById('topStrategy').textContent = `${top[0]} (${top[1]}次)`;
+
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('todayLog').textContent = `${today}.log`;
+  document.getElementById('todayLog').style.cursor = 'pointer';
+}
+
+function handleDeath(animate = true) {
+  const badge = document.getElementById('aliveBadge');
+  badge.className = 'alive-badge dead';
+  document.getElementById('aliveText').textContent = '已死亡 💀';
+  document.getElementById('balance').style.color = 'var(--red)';
+  if (animate) {
+    document.getElementById('deathOverlay').classList.add('show');
+  }
+}
+
+// ─── CHART ───────────────────────────────────────────────────────────────────
+function drawChart() {
+  const canvas = document.getElementById('chart');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth;
+  const H = 140;
+  canvas.width = W * devicePixelRatio;
+  canvas.height = H * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+
+  if (balanceHistory.length < 2) return;
+
+  const min = Math.min(...balanceHistory) * 0.998;
+  const max = Math.max(...balanceHistory) * 1.002;
+  const pad = { t: 12, r: 12, b: 20, l: 60 };
+  const W2 = W - pad.l - pad.r;
+  const H2 = H - pad.t - pad.b;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const xOf = i => pad.l + (i / (balanceHistory.length - 1)) * W2;
+  const yOf = v => pad.t + H2 - ((v - min) / (max - min)) * H2;
+
+  // Grid
+  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + (H2 / 4) * i;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    const val = max - ((max - min) / 4) * i;
+    ctx.fillStyle = '#6b7280'; ctx.font = '10px monospace';
+    ctx.fillText('¥' + Math.round(val).toLocaleString(), 4, y + 4);
+  }
+
+  // Line
+  const last = balanceHistory[balanceHistory.length - 1];
+  const color = last >= 10000 ? '#10b981' : '#ef4444';
+
+  // Fill
+  const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + H2);
+  grad.addColorStop(0, color + '33');
+  grad.addColorStop(1, color + '00');
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yOf(balanceHistory[0]));
+  balanceHistory.forEach((v, i) => ctx.lineTo(xOf(i), yOf(v)));
+  ctx.lineTo(xOf(balanceHistory.length - 1), pad.t + H2);
+  ctx.lineTo(xOf(0), pad.t + H2);
+  ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+
+  // Line stroke
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yOf(balanceHistory[0]));
+  balanceHistory.forEach((v, i) => ctx.lineTo(xOf(i), yOf(v)));
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Last dot
+  const lx = xOf(balanceHistory.length - 1), ly = yOf(last);
+  ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+  ctx.fillStyle = color; ctx.fill();
+}
+
+// ─── LOG MODAL ────────────────────────────────────────────────────────────────
+function openLog(logFile, name) {
+  document.getElementById('modalTitle').textContent = `📄 交易日志 · ${name}`;
+  document.getElementById('modalContent').textContent = '加载中...';
+  document.getElementById('modal').classList.add('open');
+
+  fetch(API + '/api/log/' + logFile)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('modalContent').textContent = JSON.stringify(data, null, 2);
+    })
+    .catch(() => {
+      document.getElementById('modalContent').textContent = '日志文件不存在或加载失败';
+    });
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+}
+
+document.getElementById('modal').onclick = (e) => {
+  if (e.target === document.getElementById('modal')) closeModal();
+};
+
+// ─── RUNTIME COUNTER ─────────────────────────────────────────────────────────
+setInterval(() => {
+  const sec = Math.floor((Date.now() - startTime) / 1000);
+  const m = Math.floor(sec / 60).toString().padStart(2, '0');
+  const s = (sec % 60).toString().padStart(2, '0');
+  document.getElementById('runtimeBig').textContent = `${m}:${s}`;
+  document.getElementById('runtime').textContent = `运行 ${m}m${s}s`;
+}, 1000);
+
+// ─── START ────────────────────────────────────────────────────────────────────
+connect();
+window.addEventListener('resize', drawChart);
+</script>
+</body>
+</html>

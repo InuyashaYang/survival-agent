@@ -1,0 +1,10 @@
+{
+  "name": "survival-agent",
+  "version": "1.0.0",
+  "description": "Virtual trading agent that dies if it doesn't make money",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "dependencies": {}
+}
