@@ -18,6 +18,10 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
+// ─── STRATEGIES ───────────────────────────────────────────────────────────────
+const GithubBounty   = require('./strategies/github-bounty.js');
+// const SecondhandDeals = require('./strategies/secondhand-deals.js'); // WIP
+
 // ─── BROKER LOADING ───────────────────────────────────────────────────────────
 // 通过 BROKER 环境变量选择交易接口:
 //   BROKER=paper        — 纸面交易，OKX 公开行情（默认）
@@ -105,6 +109,14 @@ const state = {
   lastScan: null,
   scanCount: 0,
   lastSignals: {},     // { symbol: signal details }
+  // GitHub Bounty Strategy
+  bounties: [],        // 当前可接的悬赏列表
+  bountyTrades: [],    // 已结算的悬赏
+  bountyInProgress: [],// 正在"提交中"的
+  // Secondhand Deals: disabled (WIP)
+  deals: [],
+  dealTrades: [],
+  dealHolding: [],
 };
 
 // ─── MARKET DATA ──────────────────────────────────────────────────────────────
@@ -500,7 +512,52 @@ async function scan() {
     }
   }
 
-  broadcast({ type: 'scan', signals: state.lastSignals, positions: state.positions, balance: state.balance });
+  // ── 策略2: GitHub Bounty ─────────────────────────────────────────────────
+  // 每 5 次扫描刷新一次悬赏列表（GitHub API rate limit 友好）
+  if (state.scanCount % 5 === 1) {
+    GithubBounty.scan().then(bounties => {
+      state.bounties = bounties;
+      debug('INFO', 'BOUNTY', `Found ${bounties.length} opportunities, top: ${bounties[0]?.title?.slice(0,40) || 'none'}`);
+      broadcast({ type: 'bounties', bounties: state.bounties });
+
+      // 自动接单：选预期价值最高的还没接的
+      for (const opp of bounties.slice(0, 2)) {
+        const claim = GithubBounty.claimBounty(opp, (result) => {
+          const pnl = result.pnl;
+          state.balance += pnl > 0 ? pnl : 0;
+          state.tradeCount++;
+          if (pnl > 0) state.winCount++;
+          const trade = {
+            strategy: 'github-bounty',
+            id: result.id,
+            title: result.title,
+            repo: result.repo,
+            url: result.url,
+            reward: result.reward,
+            pnl,
+            won: result.won,
+            ts: new Date().toISOString(),
+            balance: state.balance,
+          };
+          state.bountyTrades.unshift(trade);
+          if (state.bountyTrades.length > 50) state.bountyTrades.pop();
+          state.trades.unshift({ ...trade, name: `[Bounty] ${result.title.slice(0,30)}`, pnlPct: (pnl / result.reward * 100).toFixed(0) });
+          debug('TRADE', result.won ? 'PAPER' : 'ERROR', `Bounty ${result.won ? 'WON' : 'LOST'}: ${result.title.slice(0,40)} | PnL: ${pnl > 0 ? '+' : ''}¥${pnl.toFixed(2)}`);
+          broadcast({ type: 'bountyTrade', trade, balance: state.balance });
+          if (state.balance <= 0) { state.alive = false; broadcast({ type: 'death' }); }
+        });
+        if (claim) {
+          debug('INFO', 'BOUNTY', `Claimed: ${opp.title.slice(0,40)} | reward=$${opp.reward} successRate=${(opp.successRate*100).toFixed(0)}%`);
+        }
+      }
+    }).catch(e => debug('ERROR', 'BOUNTY', `scan failed: ${e.message}`));
+  }
+  state.bountyInProgress = GithubBounty.getPending();
+
+  // 策略3 (SecondhandDeals) — WIP，暂未启用
+
+  broadcast({ type: 'scan', signals: state.lastSignals, positions: state.positions, balance: state.balance,
+    bounties: state.bounties });
 }
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
@@ -562,6 +619,14 @@ function getSummary() {
     signals: state.lastSignals,
     scanCount: state.scanCount,
     config: { DRY_RUN: CONFIG.DRY_RUN, DEBUG_LEVEL: CONFIG.DEBUG_LEVEL, BROKER: broker.name, BROKER_TYPE: broker.TYPE },
+    // Strategy 2: GitHub Bounty
+    bounties: state.bounties.slice(0, 8),
+    bountyInProgress: state.bountyInProgress,
+    bountyTrades: state.bountyTrades.slice(0, 20),
+    // Strategy 3: Secondhand Deals
+    deals: state.deals.slice(0, 8),
+    dealHolding: state.dealHolding,
+    dealTrades: state.dealTrades.slice(0, 20),
   };
 }
 
