@@ -18,6 +18,29 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
+// ─── BROKER LOADING ───────────────────────────────────────────────────────────
+// 通过 BROKER 环境变量选择交易接口:
+//   BROKER=paper        — 纸面交易，OKX 公开行情（默认）
+//   BROKER=okx          — OKX 现货实盘（需 OKX_API_KEY + OKX_SECRET_KEY + OKX_PASSPHRASE）
+//   BROKER=okx-demo     — OKX 模拟盘（需 API Key + OKX_DEMO=true）
+//   BROKER=gateio       — Gate.io 现货（需 GATEIO_API_KEY + GATEIO_SECRET）
+//   BROKER=htx          — HTX 火币现货（需 HTX_API_KEY + HTX_SECRET + HTX_ACCOUNT_ID）
+//   BROKER=hyperliquid  — Hyperliquid 永续（需 HL_PRIVATE_KEY + HL_WALLET + ethers.js）
+const BROKER_NAME = process.env.BROKER || 'paper';
+let broker;
+try {
+  const brokerFile = BROKER_NAME === 'okx-demo'
+    ? './brokers/okx.js'
+    : `./brokers/${BROKER_NAME}.js`;
+  if (BROKER_NAME === 'okx-demo') process.env.OKX_DEMO = 'true';
+  broker = require(brokerFile);
+  console.log(`✅ Broker loaded: ${broker.name} [${broker.TYPE}]`);
+} catch(e) {
+  console.warn(`⚠️  Broker "${BROKER_NAME}" not found or failed to load: ${e.message}`);
+  console.warn('   Falling back to paper broker');
+  broker = require('./brokers/paper.js');
+}
+
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const CONFIG = {
   PORT: 7788,
@@ -286,7 +309,7 @@ function calcPositionSize(price) {
   return qty;
 }
 
-function openPosition(sym, signal, quote) {
+async function openPosition(sym, signal, quote) {
   if (Object.keys(state.positions).length >= CONFIG.MAX_OPEN_POSITIONS) {
     debug('INFO', 'EXEC', `${sym}: MAX_OPEN_POSITIONS reached (${CONFIG.MAX_OPEN_POSITIONS}), skip`);
     return null;
@@ -324,11 +347,17 @@ function openPosition(sym, signal, quote) {
   if (CONFIG.DRY_RUN) {
     debug('TRADE', 'PAPER', `[DRY RUN] OPEN ${signal.signal} ${sym} | qty=${qty.toFixed(6)} @ ¥${price.toFixed(2)} | cost=¥${cost.toFixed(2)} | SL=¥${order.stopLoss.toFixed(2)} | TP=¥${order.takeProfit.toFixed(2)}`);
   } else {
-    debug('TRADE', 'REAL', `[LIVE] OPEN ${signal.signal} ${sym} | qty=${qty.toFixed(6)} @ ¥${price.toFixed(2)}`);
-    // TODO: broker.placeOrder(order)
-    // Swap this block for real execution:
-    // const result = await broker.placeOrder({ sym, side: signal.signal, qty, price });
-    // order.brokerOrderId = result.orderId;
+    debug('TRADE', broker.TYPE === 'live' ? 'REAL' : 'PAPER', `[${broker.name}] OPEN ${signal.signal} ${sym} | qty=${qty.toFixed(6)} @ ¥${price.toFixed(2)}`);
+    try {
+      // ── REAL EXECUTION via pluggable broker ──────────────────────────────
+      const result = await broker.placeOrder({ symbol: sym, side: signal.signal, qty, price });
+      order.brokerOrderId = result.orderId;
+      order.brokerStatus  = result.status;
+      debug('TRADE', 'REAL', `Order placed: id=${result.orderId} status=${result.status}`);
+    } catch(e) {
+      debug('ERROR', 'EXEC', `Broker placeOrder failed: ${e.message} — position NOT opened`);
+      return null;  // abort if real order fails
+    }
   }
 
   state.positions[sym] = order;
@@ -336,7 +365,7 @@ function openPosition(sym, signal, quote) {
   return order;
 }
 
-function checkExits(quotes) {
+async function checkExits(quotes) {
   // ── BREAKPOINT 6: EXIT CHECK ──────────────────────────────────────────────
   debug('TRACE', 'EXEC', `Checking exits for ${Object.keys(state.positions).length} open positions`);
 
@@ -363,11 +392,11 @@ function checkExits(quotes) {
 
     debug('TRACE', 'EXEC', `${sym}: price=${currentPrice.toFixed(4)} | SL=${pos.stopLoss.toFixed(4)} | TP=${pos.takeProfit.toFixed(4)} | held=${holdingMinutes}min | ${exitReason || 'holding'}`);
 
-    if (exitReason) closePosition(sym, currentPrice, exitReason, quote);
+    if (exitReason) await closePosition(sym, currentPrice, exitReason, quote);
   }
 }
 
-function closePosition(sym, exitPrice, reason, quote) {
+async function closePosition(sym, exitPrice, reason, quote) {
   const pos = state.positions[sym];
   if (!pos) return;
 
@@ -375,10 +404,22 @@ function closePosition(sym, exitPrice, reason, quote) {
   const pnl = pos.side === 'BUY' ? proceeds - pos.cost : pos.cost - proceeds;
   const pnlPct = (pnl / pos.cost * 100).toFixed(2);
 
-  // ── BREAKPOINT 7: TRADE CLOSE ─────────────────────────────────────────────
-  debug('TRADE', CONFIG.DRY_RUN ? 'PAPER' : 'REAL',
-    `CLOSE ${pos.side} ${sym} | entry=¥${pos.price.toFixed(4)} exit=¥${exitPrice.toFixed(4)} | PnL=${pnl >= 0 ? '+' : ''}¥${pnl.toFixed(2)} (${pnlPct}%) | reason: ${reason}`
-  );
+  if (CONFIG.DRY_RUN) {
+    debug('TRADE', CONFIG.DRY_RUN ? 'PAPER' : 'REAL',
+      `CLOSE ${pos.side} ${sym} | entry=¥${pos.price.toFixed(4)} exit=¥${exitPrice.toFixed(4)} | PnL=${pnl >= 0 ? '+' : ''}¥${pnl.toFixed(2)} (${pnlPct}%) | reason: ${reason}`
+    );
+  } else {
+    debug('TRADE', 'REAL', `[${broker.name}] CLOSE ${pos.side} ${sym} @ ¥${exitPrice.toFixed(4)} | reason: ${reason}`);
+    try {
+      // ── REAL CLOSE: place reverse order ───────────────────────────────────
+      const closeSide = pos.side === 'BUY' ? 'SELL' : 'BUY';
+      const result = await broker.placeOrder({ symbol: sym, side: closeSide, qty: pos.qty, price: exitPrice });
+      debug('TRADE', 'REAL', `Close order placed: id=${result.orderId} status=${result.status}`);
+    } catch(e) {
+      debug('ERROR', 'EXEC', `Broker close order failed: ${e.message} — forcing paper close`);
+      // 真实平仓失败时仍更新内部状态，但记录错误
+    }
+  }
 
   state.balance += proceeds;
   if (pnl > 0) state.winCount++;
@@ -445,7 +486,7 @@ async function scan() {
   }
 
   updatePriceHistory(quotes);
-  checkExits(quotes);
+  await checkExits(quotes);
 
   // Evaluate signals for each symbol
   for (const [sym, quote] of Object.entries(quotes)) {
@@ -455,7 +496,7 @@ async function scan() {
     debug('INFO', 'SIGNAL', `${quote.name}: ${signal.signal.padEnd(5)} | ${signal.reason}`);
 
     if (signal.signal === 'BUY' || signal.signal === 'SELL') {
-      openPosition(sym, signal, quote);
+      await openPosition(sym, signal, quote);
     }
   }
 
@@ -520,7 +561,7 @@ function getSummary() {
     trades: state.trades.slice(0, 50),
     signals: state.lastSignals,
     scanCount: state.scanCount,
-    config: { DRY_RUN: CONFIG.DRY_RUN, DEBUG_LEVEL: CONFIG.DEBUG_LEVEL },
+    config: { DRY_RUN: CONFIG.DRY_RUN, DEBUG_LEVEL: CONFIG.DEBUG_LEVEL, BROKER: broker.name, BROKER_TYPE: broker.TYPE },
   };
 }
 
@@ -536,6 +577,7 @@ server.listen(CONFIG.PORT, async () => {
   debug('INFO', 'START', `║  Dashboard: http://localhost:${CONFIG.PORT}   ║`);
   debug('INFO', 'START', `╚══════════════════════════════════════╝`);
   debug('INFO', 'START', `Mode:        ${CONFIG.DRY_RUN ? '📄 PAPER TRADE (DRY_RUN=true)' : '🔴 LIVE TRADE (DRY_RUN=false)'}`);
+  debug('INFO', 'START', `Broker:      ${broker.name} [${broker.TYPE}]  (BROKER=${BROKER_NAME})`);
   debug('INFO', 'START', `Debug level: ${CONFIG.DEBUG_LEVEL} (0=silent → 4=trace)`);
   debug('INFO', 'START', `Balance:     ¥${CONFIG.INITIAL_BALANCE}`);
   debug('INFO', 'START', `Scan every:  ${CONFIG.SCAN_INTERVAL_MS}ms`);
