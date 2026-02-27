@@ -512,52 +512,62 @@ async function scan() {
     }
   }
 
-  // ── 策略2: GitHub Bounty ─────────────────────────────────────────────────
-  // 每 5 次扫描刷新一次悬赏列表（GitHub API rate limit 友好）
+  // ── 策略2: GitHub Bounty（全真实版）──────────────────────────────────────
+  // 每 5 次扫描刷新悬赏列表 + AI 分析
   if (state.scanCount % 5 === 1) {
     GithubBounty.scan().then(bounties => {
       state.bounties = bounties;
-      debug('INFO', 'BOUNTY', `Found ${bounties.length} opportunities, top: ${bounties[0]?.title?.slice(0,40) || 'none'}`);
+      const analyzed = bounties.filter(b => b.analysis);
+      const solvable = bounties.filter(b => b.analysis?.canSolve);
+      debug('INFO', 'BOUNTY', `Scanned ${bounties.length} bounties | analyzed: ${analyzed.length} | solvable: ${solvable.length}`);
       broadcast({ type: 'bounties', bounties: state.bounties });
 
-      // 自动接单：选预期价值最高的还没接的
-      for (const opp of bounties.slice(0, 2)) {
-        const claim = GithubBounty.claimBounty(opp, (result) => {
-          const pnl = result.pnl;
-          state.balance += pnl > 0 ? pnl : 0;
+      // 自动接单：选可接且未接过的（置信度 > MIN_CONFIDENCE）
+      for (const opp of solvable.slice(0, 2)) {
+        GithubBounty.claimBounty(opp, (result) => {
+          // PR 结算回调（merged 或 closed）
+          const usdReward = result.pnl || 0;
+          const cnyPnl = usdReward * 7.25; // USD→CNY
+          state.balance += cnyPnl;
           state.tradeCount++;
-          if (pnl > 0) state.winCount++;
+          if (result.won) state.winCount++;
           const trade = {
             strategy: 'github-bounty',
             id: result.id,
             title: result.title,
             repo: result.repo,
             url: result.url,
+            prUrl: result.prUrl,
             reward: result.reward,
-            pnl,
+            pnl: cnyPnl,
             won: result.won,
             ts: new Date().toISOString(),
             balance: state.balance,
           };
           state.bountyTrades.unshift(trade);
           if (state.bountyTrades.length > 50) state.bountyTrades.pop();
-          state.trades.unshift({ ...trade, name: `[Bounty] ${result.title.slice(0,30)}`, pnlPct: (pnl / result.reward * 100).toFixed(0) });
-          debug('TRADE', result.won ? 'PAPER' : 'ERROR', `Bounty ${result.won ? 'WON' : 'LOST'}: ${result.title.slice(0,40)} | PnL: ${pnl > 0 ? '+' : ''}¥${pnl.toFixed(2)}`);
+          state.trades.unshift({ ...trade, name: `[Bounty] ${result.title.slice(0,30)}`, pnlPct: result.won ? '+100' : '0' });
+          debug('TRADE', result.won ? 'PAPER' : 'ERROR',
+            `Bounty PR ${result.won ? '✅ MERGED' : '❌ CLOSED'}: ${result.title.slice(0,40)} | +¥${cnyPnl.toFixed(0)} | ${result.prUrl || 'no PR'}`);
           broadcast({ type: 'bountyTrade', trade, balance: state.balance });
           if (state.balance <= 0) { state.alive = false; broadcast({ type: 'death' }); }
-        });
-        if (claim) {
-          debug('INFO', 'BOUNTY', `Claimed: ${opp.title.slice(0,40)} | reward=$${opp.reward} successRate=${(opp.successRate*100).toFixed(0)}%`);
-        }
+        }).then(claim => {
+          if (claim) debug('INFO', 'BOUNTY',
+            `→ Starting real work: ${opp.title.slice(0,40)} | $${opp.reward} | approach: ${opp.analysis?.approach?.slice(0,60)}`);
+        }).catch(e => debug('ERROR', 'BOUNTY', `claimBounty failed: ${e.message}`));
       }
     }).catch(e => debug('ERROR', 'BOUNTY', `scan failed: ${e.message}`));
   }
+
+  // 每轮检查 PR 状态（是否 merged/closed）
+  GithubBounty.checkPRStatus().catch(e => debug('ERROR', 'BOUNTY', `checkPR failed: ${e.message}`));
+
   state.bountyInProgress = GithubBounty.getPending();
 
   // 策略3 (SecondhandDeals) — WIP，暂未启用
 
   broadcast({ type: 'scan', signals: state.lastSignals, positions: state.positions, balance: state.balance,
-    bounties: state.bounties });
+    bounties: state.bounties, bountyInProgress: state.bountyInProgress });
 }
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────

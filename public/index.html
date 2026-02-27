@@ -46,6 +46,7 @@ body{background:var(--bg);color:var(--text);font-family:'SF Mono','Fira Code',mo
 /* Bounty cards */
 .bc{padding:8px 9px;border-radius:6px;margin-bottom:4px;border:1px solid var(--border);border-left:3px solid var(--blue);cursor:pointer;transition:background .15s}
 .bc:hover{background:rgba(59,130,246,.04)}
+.bc.solvable{border-left-color:var(--green);background:rgba(16,185,129,.03)}
 .bc.working{border-left-color:var(--yellow)}
 .reward{font-size:14px;font-weight:700;color:var(--blue)}
 
@@ -270,19 +271,36 @@ function renderBounties(bounties){
   if(!bounties||!bounties.length){el.innerHTML='<div class="empty">等待 GitHub API 数据...</div>';return;}
   el.innerHTML='';
   bounties.forEach(b=>{
-    const d=document.createElement('div');d.className='bc';
+    const a=b.analysis;
+    const d=document.createElement('div');
+    const canSolve=a&&a.canSolve;
+    d.className='bc'+(canSolve?' solvable':'');
     d.onclick=()=>window.open(b.url,'_blank');
-    const ev=(b.reward*b.successRate).toFixed(0);
+
+    let analysisHtml='<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">AI 分析中...</div>';
+    if(a){
+      const confColor=a.confidence>0.7?'var(--green)':a.confidence>0.5?'var(--yellow)':'var(--red)';
+      const taskColor={'documentation':'var(--cyan)','bug':'var(--red)','test':'var(--purple)','feature':'var(--blue)'}[a.taskType]||'var(--muted)';
+      analysisHtml=`
+        <div style="display:flex;gap:5px;align-items:center;margin-top:4px;flex-wrap:wrap">
+          <span style="padding:1px 5px;border-radius:3px;font-size:9px;background:rgba(255,255,255,.05);color:${taskColor}">${a.taskType||'?'}</span>
+          <span style="font-size:9px;color:${confColor}">置信度 ${(a.confidence*100).toFixed(0)}%</span>
+          ${a.canSolve?'<span style="font-size:9px;color:var(--green)">✅ 可接单</span>':'<span style="font-size:9px;color:var(--muted)">⏭ 跳过</span>'}
+        </div>
+        ${a.approach?`<div style="font-size:10px;color:var(--muted);margin-top:3px;line-height:1.4">${a.approach.slice(0,100)}</div>`:''}`;
+    }
+
     d.innerHTML=`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
         <span class="reward">$${b.reward}</span>
-        <span style="font-size:10px;color:var(--muted)">成功率 ${(b.successRate*100).toFixed(0)}% · EV $${ev}</span>
+        <span style="font-size:9px;color:var(--muted)">${b.comments} 条讨论</span>
       </div>
-      <div style="font-size:11px;font-weight:600;margin-bottom:4px;line-height:1.4">${b.title}</div>
-      <div style="font-size:10px;color:var(--blue);margin-bottom:3px">${b.repo}</div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap">
-        ${b.labels.map(l=>`<span style="padding:0 4px;border-radius:3px;background:rgba(59,130,246,.1);color:var(--blue);font-size:9px">${l}</span>`).join('')}
-      </div>`;
+      <div style="font-size:11px;font-weight:600;margin-bottom:3px;line-height:1.4">${b.title}</div>
+      <div style="font-size:10px;color:var(--blue)">${b.repo}</div>
+      <div style="display:flex;gap:3px;margin-top:3px;flex-wrap:wrap">
+        ${b.labels.slice(0,4).map(l=>`<span style="padding:0 4px;border-radius:3px;background:rgba(59,130,246,.1);color:var(--blue);font-size:9px">${l}</span>`).join('')}
+      </div>
+      ${analysisHtml}`;
     el.appendChild(d);
   });
 }
@@ -291,16 +309,32 @@ function renderWorking(inProgress){
   const el=document.getElementById('bountyWorking');
   if(!inProgress||!inProgress.length){el.innerHTML='<div class="empty" style="padding:10px">暂无进行中</div>';return;}
   el.innerHTML='';
+  const statusLabel={
+    'starting':'🚀 启动中','forking':'🍴 Fork 中','cloning':'📥 克隆中',
+    'reading':'📖 读代码','coding':'✍️ 写代码中','pushing':'📤 推送中',
+    'pr-creating':'🔗 创建 PR','pr-open':'⏳ 等待 Review','done':'✅ 完成',
+  };
+  const statusColor={
+    'starting':'var(--muted)','forking':'var(--blue)','cloning':'var(--blue)',
+    'reading':'var(--cyan)','coding':'var(--yellow)','pushing':'var(--orange)',
+    'pr-creating':'var(--purple)','pr-open':'var(--green)',
+  };
   inProgress.forEach(b=>{
-    const remain=Math.max(0,b.resolve_at-Date.now());
     const d=document.createElement('div');d.className='bc working';
-    d.onclick=()=>window.open(b.url,'_blank');
+    const lbl=statusLabel[b.status]||b.status;
+    const col=statusColor[b.status]||'var(--muted)';
+    const elapsed=b.startedAt?Math.floor((Date.now()-b.startedAt)/1000):0;
     d.innerHTML=`
       <div style="display:flex;justify-content:space-between;align-items:center">
         <span style="font-size:11px;font-weight:600">${b.title.slice(0,38)}</span>
-        <span style="color:var(--yellow);font-size:10px">${Math.ceil(remain/1000)}s</span>
+        <span style="color:${col};font-size:10px">${lbl}</span>
       </div>
-      <div style="font-size:10px;color:var(--muted);margin-top:2px">$${b.reward} · 成功率 ${(b.successRate*100).toFixed(0)}%</div>`;
+      <div style="display:flex;justify-content:space-between;margin-top:3px">
+        <span style="font-size:10px;color:var(--muted)">$${b.reward} · ${b.repo}</span>
+        <span style="font-size:9px;color:var(--muted)">${elapsed}s</span>
+      </div>
+      ${b.prUrl?`<div style="margin-top:3px"><a href="${b.prUrl}" target="_blank" style="font-size:9px;color:var(--blue);word-break:break-all">${b.prUrl}</a></div>`:''}
+      ${b.analysis?.approach?`<div style="font-size:9px;color:var(--muted);margin-top:2px;font-style:italic">${b.analysis.approach.slice(0,80)}</div>`:''}`;
     el.appendChild(d);
   });
 }
@@ -311,13 +345,14 @@ function addBountyTrade(t,animate){
   const w=t.won||parseFloat(t.pnl||0)>0;
   const d=document.createElement('div');d.className=`ti ${w?'win':'lose'}`;
   if(animate)d.style.animation='si .3s ease';
-  d.onclick=()=>t.url&&window.open(t.url,'_blank');
+  d.onclick=()=>t.prUrl&&window.open(t.prUrl,'_blank');
   d.innerHTML=`
     <div style="display:flex;justify-content:space-between;margin-bottom:2px">
       <span style="font-size:10px;font-weight:600">${(t.title||'').slice(0,36)}</span>
-      <span style="font-weight:700;color:${w?'var(--green)':'var(--red)'};font-size:11px">${w?'+':''}$${parseFloat(t.reward||0).toFixed(0)}</span>
+      <span style="font-weight:700;color:${w?'var(--green)':'var(--red)'};font-size:11px">${w?'+¥':'¥'}${Math.abs(parseFloat(t.pnl||0)).toFixed(0)}</span>
     </div>
-    <div style="font-size:9px;color:var(--muted)">${t.repo||''} · ${w?'✅ 成功':'❌ 失败'} · ${(t.ts||'').slice(11,19)}</div>`;
+    <div style="font-size:9px;color:var(--muted)">${t.repo||''} · ${w?'✅ PR Merged':'❌ PR Closed'} · ${(t.ts||'').slice(11,19)}</div>
+    ${t.prUrl?`<div style="font-size:9px;color:var(--blue);margin-top:1px">${t.prUrl}</div>`:''}`;
   el.insertBefore(d,el.firstChild);
   while(el.children.length>20)el.removeChild(el.lastChild);
   document.getElementById('bCount').textContent=0;
