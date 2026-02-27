@@ -32,6 +32,9 @@ const CFG = {
   MIN_CONFIDENCE: 0.55,    // 置信度低于此不尝试
   MAX_ACTIVE: 2,           // 最多同时进行中的 PR
   PR_TIMEOUT_MS: 5 * 60 * 1000,  // 5分钟无反应视为超时
+  // Telegram 通知（PR merge 时发送）
+  TG_BOT_TOKEN: process.env.TG_BOT_TOKEN || '8642375853:AAFi55AcgCz-NaWc_uDbFgu8zQH9vopDMlQ',
+  TG_CHAT_ID:   process.env.TG_CHAT_ID   || '8323001155',
 };
 
 // ─── STATE ─────────────────────────────────────────────────────────────────────
@@ -447,12 +450,14 @@ async function checkPRStatus() {
       );
 
       if (prInfo.merged) {
-        // 合并了！赚到钱
+        // 合并了！发 Telegram 通知 + 结算
         const pnl = entry.expectedReward;
         const result = { ...entry.bounty, prUrl: entry.prUrl, pnl, won: true, mergedAt: prInfo.mergedAt };
         state.activePRs.delete(id);
         state.completedPRs.unshift(result);
         settled.push(result);
+        // 先通知，再结算
+        notifyMerge(entry.bounty, entry.prUrl, pnl).catch(() => {});
         if (entry.onSettle) entry.onSettle(result);
         cleanup(entry.repoPath);
 
@@ -472,6 +477,55 @@ async function checkPRStatus() {
   }
 
   return settled;
+}
+
+// ─── TELEGRAM MERGE NOTIFICATION ─────────────────────────────────────────────
+// PR merged → 通知用户去 IssueHunt 手动领钱
+function notifyMerge(bounty, prUrl, rewardUsd) {
+  const claimUrl = `https://issuehunt.io/r/${bounty.repo}/issues/${bounty.issueNumber}`;
+  const cnyAmount = (rewardUsd * 7.25).toFixed(0);
+
+  const text = [
+    `🎉 *PR Merged！Survival Agent 赚到钱了*`,
+    ``,
+    `📌 *${escTg(bounty.title)}*`,
+    `🏦 奖励：$${rewardUsd} USD（约 ¥${cnyAmount}）`,
+    ``,
+    `🔗 [查看 PR](${prUrl})`,
+    `💰 [去 IssueHunt 领取](${claimUrl})`,
+    ``,
+    `_点击领取链接 → 登录 IssueHunt → Claim Bounty_`,
+  ].join('\n');
+
+  return tgSend(text, 'Markdown');
+}
+
+function escTg(s) {
+  return (s || '').replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+}
+
+function tgSend(text, parseMode) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      chat_id: CFG.TG_CHAT_ID,
+      text,
+      parse_mode: parseMode || 'Markdown',
+      disable_web_page_preview: false,
+    });
+    const opts = {
+      hostname: 'api.telegram.org',
+      path: `/bot${CFG.TG_BOT_TOKEN}/sendMessage`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      timeout: 10000,
+    };
+    const req = https.request(opts, res => {
+      let b = ''; res.on('data', d => b += d);
+      res.on('end', () => resolve(JSON.parse(b)));
+    });
+    req.on('error', reject).on('timeout', () => { req.destroy(); reject(new Error('tg timeout')); });
+    req.write(body); req.end();
+  });
 }
 
 function cleanup(dir) {
